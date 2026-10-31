@@ -31,7 +31,8 @@ jobs:
           echo "rev=$(git -C neovim rev-parse HEAD)" >>"$GITHUB_OUTPUT"
           echo "version=$(scripts/build-neovim.sh version)" >>"$GITHUB_OUTPUT"
 
-      - uses: actions/cache@v4
+      - id: host-cache
+        uses: actions/cache/restore@v4
         with:
           path: _build/host
           key: nvim-host-${{ runner.os }}-${{ steps.nvim.outputs.rev }}
@@ -40,6 +41,13 @@ jobs:
         run: |
           sudo apt-get update -q && sudo apt-get install -qy ninja-build
           scripts/build-neovim.sh host
+
+      # Saved right away so a failing wasm32 build doesn't discard it.
+      - if: steps.host-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: _build/host
+          key: nvim-host-${{ runner.os }}-${{ steps.nvim.outputs.rev }}
 
       - uses: nixbuild/nix-quick-install-action@v35
         with:
