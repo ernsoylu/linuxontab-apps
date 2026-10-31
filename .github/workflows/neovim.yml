@@ -51,11 +51,37 @@ jobs:
         with:
           name: linuxwasm
 
+      # Parts of the toolchain (musl, kernel headers, compiler-rt/libc++) aren't
+      # in the binary cache and build from GitHub-hosted sources, so keep the
+      # store between runs.
+      - id: nix-cache
+        uses: nix-community/cache-nix-action/restore@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ env.DISTRO_REV }}
+
+      - name: wasm32 toolchain
+        run: |
+          # GitHub rate-limits source downloads from shared runners (HTTP 429).
+          for attempt in 1 2 3; do
+            nix shell --inputs-from "$DISTRO" nixpkgs#binaryen nixpkgs#wabt --command \
+              nix develop "$DISTRO" --command true && exit 0
+            sleep 90
+          done
+          exit 1
+        env:
+          DISTRO: github:tombl/distro/${{ env.DISTRO_REV }}
+
+      - if: steps.nix-cache.outputs.hit-primary-key != 'true'
+        uses: nix-community/cache-nix-action/save@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ env.DISTRO_REV }}
+
       - name: wasm32 build
         run: |
-          distro=github:tombl/distro/$DISTRO_REV
-          nix shell --inputs-from "$distro" nixpkgs#binaryen nixpkgs#wabt --command \
-            nix develop "$distro" --command scripts/build-neovim.sh wasm
+          nix shell --inputs-from "$DISTRO" nixpkgs#binaryen nixpkgs#wabt --command \
+            nix develop "$DISTRO" --command scripts/build-neovim.sh wasm
+        env:
+          DISTRO: github:tombl/distro/${{ env.DISTRO_REV }}
 
       - uses: actions/upload-artifact@v4
         with:
