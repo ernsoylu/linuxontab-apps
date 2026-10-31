@@ -1,3 +1,39 @@
+diff -ruN a/src/unix/linux.c b/src/unix/linux.c
+--- a/src/unix/linux.c	2026-10-31 08:41:06.635092553 +0000
++++ b/src/unix/linux.c	2026-10-31 10:44:20.314348112 +0000
+@@ -514,6 +514,14 @@
+   int ringfd;
+   int no_sqarray;
+ 
++#if defined(__wasm__)
++  /* Linux on WebAssembly has no mmap(), so the rings can't be mapped: leave
++   * io_uring off and use the epoll and threadpool paths. */
++  (void) epollfd;
++  (void) iou;
++  (void) entries;
++  (void) flags;
++#else
+   sq = MAP_FAILED;
+   sqe = MAP_FAILED;
+ 
+@@ -621,13 +629,16 @@
+     munmap(sqe, sqelen);
+ 
+   uv__close(ringfd);
++#endif
+ }
+ 
+ 
+ static void uv__iou_delete(struct uv__iou* iou) {
+   if (iou->ringfd > -1) {
++#if !defined(__wasm__)
+     munmap(iou->sq, iou->maxlen);
+     munmap(iou->sqe, iou->sqelen);
++#endif
+     uv__close(iou->ringfd);
+     iou->ringfd = -1;
+   }
+diff -ruN a/src/unix/process.c b/src/unix/process.c
 --- a/src/unix/process.c	2026-10-31 08:41:06.635230053 +0000
 +++ b/src/unix/process.c	2026-10-31 08:41:06.658052985 +0000
 @@ -55,6 +55,18 @@
