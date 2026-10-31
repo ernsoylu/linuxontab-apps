@@ -1,0 +1,59 @@
+diff --color -ruN a/runtime/ftplugin/help.lua b/runtime/ftplugin/help.lua
+--- a/runtime/ftplugin/help.lua	2026-10-31 08:42:27.207919225 +0000
++++ b/runtime/ftplugin/help.lua	2026-10-31 08:42:39.682540396 +0000
+@@ -1,5 +1,5 @@
+ -- use treesitter over syntax (for highlighted code blocks)
+-vim.treesitter.start()
++pcall(vim.treesitter.start) -- no parser on wasm: no dlopen()
+ 
+ --- Apply current colorscheme to lists of default highlight groups
+ ---
+diff --color -ruN a/runtime/ftplugin/lua.lua b/runtime/ftplugin/lua.lua
+--- a/runtime/ftplugin/lua.lua	2026-10-31 08:42:27.214294369 +0000
++++ b/runtime/ftplugin/lua.lua	2026-10-31 08:42:39.682585844 +0000
+@@ -1,5 +1,5 @@
+ -- use treesitter over syntax
+-vim.treesitter.start()
++pcall(vim.treesitter.start) -- no parser on wasm: no dlopen()
+ 
+ vim.bo.includeexpr = [[v:lua.require'vim._ftplugin.lua'.includeexpr(v:fname)]]
+ vim.bo.omnifunc = 'v:lua.vim.lua_omnifunc'
+diff --color -ruN a/runtime/ftplugin/markdown.lua b/runtime/ftplugin/markdown.lua
+--- a/runtime/ftplugin/markdown.lua	2026-10-31 08:42:27.220492326 +0000
++++ b/runtime/ftplugin/markdown.lua	2026-10-31 08:42:39.682604411 +0000
+@@ -1,4 +1,4 @@
+-vim.treesitter.start()
++pcall(vim.treesitter.start) -- no parser on wasm: no dlopen()
+ 
+ vim.keymap.set('n', 'gO', function()
+   require('vim.treesitter._headings').show_toc()
+diff --color -ruN a/runtime/ftplugin/query.lua b/runtime/ftplugin/query.lua
+--- a/runtime/ftplugin/query.lua	2026-10-31 08:42:27.226775024 +0000
++++ b/runtime/ftplugin/query.lua	2026-10-31 08:42:39.682620878 +0000
+@@ -8,7 +8,7 @@
+ -- Do not set vim.b.did_ftplugin = 1 to allow loading of ftplugin/lisp.vim
+ 
+ -- use treesitter over syntax
+-vim.treesitter.start()
++pcall(vim.treesitter.start) -- no parser on wasm: no dlopen()
+ 
+ -- set omnifunc
+ vim.bo.omnifunc = 'v:lua.vim.treesitter.query.omnifunc'
+diff --color -ruN a/src/nvim/os/pty_proc_unix.c b/src/nvim/os/pty_proc_unix.c
+--- a/src/nvim/os/pty_proc_unix.c	2026-10-31 08:42:27.201609791 +0000
++++ b/src/nvim/os/pty_proc_unix.c	2026-10-31 08:42:39.689518833 +0000
+@@ -183,7 +183,14 @@
+   ptyproc->winsize = (struct winsize){ ptyproc->height, ptyproc->width, 0, 0 };
+   uv_disable_stdio_inheritance();
+   int master;
++#ifdef __wasm__
++  // Linux on WebAssembly has no fork(), so no forkpty(): :terminal and pty
++  // jobs are unavailable. Plain jobs and :! go through libuv's posix_spawn().
++  errno = ENOSYS;
++  int pid = -1;
++#else
+   int pid = forkpty(&master, NULL, &termios_default, &ptyproc->winsize);
++#endif
+ 
+   if (pid < 0) {
+     status = -errno;

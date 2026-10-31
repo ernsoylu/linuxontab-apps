@@ -1,0 +1,98 @@
+name: neovim
+
+# Builds the ./neovim submodule for LinuxOnTab 2.0 (wasm32-linux-musl). Pushes to
+# main release it as neovim-v<version> unless that release already exists; bump
+# the submodule to ship a new version. A manual run re-uploads the assets.
+on:
+  push:
+    branches: [main]
+    paths: [neovim, patches/**, toolchain/**, scripts/build-neovim.sh, .github/workflows/neovim.yml]
+  pull_request:
+    paths: [neovim, patches/**, toolchain/**, scripts/build-neovim.sh, .github/workflows/neovim.yml]
+  workflow_dispatch:
+
+env:
+  # tombl/distro provides the wasm32 clang and musl sysroot LinuxOnTab 2.0's
+  # userland is built with. Pinned to a commit its CI pushed to the cache.
+  DISTRO_REV: 189b9c3ed921015572e88e02c16275fb182b72cb
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.nvim.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - id: nvim
+        run: |
+          echo "rev=$(git -C neovim rev-parse HEAD)" >>"$GITHUB_OUTPUT"
+          echo "version=$(scripts/build-neovim.sh version)" >>"$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        with:
+          path: _build/host
+          key: nvim-host-${{ runner.os }}-${{ steps.nvim.outputs.rev }}
+
+      - name: Native build (code generators, helptags)
+        run: |
+          sudo apt-get update -q && sudo apt-get install -qy ninja-build
+          scripts/build-neovim.sh host
+
+      - uses: nixbuild/nix-quick-install-action@v35
+        with:
+          nix_conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - uses: cachix/cachix-action@v17
+        with:
+          name: linuxwasm
+
+      - name: wasm32 build
+        run: |
+          distro=github:tombl/distro/$DISTRO_REV
+          nix shell --inputs-from "$distro" nixpkgs#binaryen nixpkgs#wabt --command \
+            nix develop "$distro" --command scripts/build-neovim.sh wasm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: neovim-wasm32
+          path: dist/
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: neovim-wasm32
+          path: dist
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          tag=neovim-v$VERSION
+          if gh release view "$tag" >/dev/null 2>&1; then
+            if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+              echo "$tag is already released"
+              exit 0
+            fi
+            gh release upload "$tag" dist/* --clobber
+          else
+            gh release create "$tag" dist/* --target "$GITHUB_SHA" \
+              --title "Neovim $VERSION for LinuxOnTab 2.0 (wasm32)" \
+              --notes "Neovim $VERSION cross-compiled to wasm32-linux-musl with tombl/distro@$DISTRO_REV. Install inside LinuxOnTab 2.0:
+
+          \`\`\`sh
+          curl -fsSL https://raw.githubusercontent.com/$GH_REPO/main/install.sh | sh
+          \`\`\`"
+          fi

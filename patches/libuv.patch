@@ -1,0 +1,96 @@
+--- a/src/unix/process.c	2026-10-31 08:41:06.635230053 +0000
++++ b/src/unix/process.c	2026-10-31 08:41:06.658052985 +0000
+@@ -55,6 +55,18 @@
+ extern char **environ;
+ #endif
+ 
++#if defined(__wasm__)
++/* Linux on WebAssembly has no fork(): spawn through posix_spawn() using the
++ * macOS code path below. musl lacks POSIX_SPAWN_CLOEXEC_DEFAULT, but libuv
++ * opens every descriptor with O_CLOEXEC, and adddup2(fd, fd) clears
++ * FD_CLOEXEC in the child, which is what addinherit_np does on macOS. */
++# include <spawn.h>
++# include <paths.h>
++# define POSIX_SPAWN_CLOEXEC_DEFAULT 0
++# define posix_spawn_file_actions_addinherit_np(actions, fd)                  \
++  posix_spawn_file_actions_adddup2((actions), (fd), (fd))
++#endif
++
+ #if defined(__linux__) || \
+     defined(__GNU__)
+ # include <grp.h>
+@@ -417,7 +429,7 @@
+ }
+ 
+ 
+-#if defined(__APPLE__)
++#if defined(__APPLE__) || defined(__wasm__)
+ typedef struct uv__posix_spawn_fncs_tag {
+   struct {
+     int (*addchdir_np)(const posix_spawn_file_actions_t *, const char *);
+@@ -431,13 +443,22 @@
+ 
+ 
+ static void uv__spawn_init_posix_spawn_fncs(void) {
++#if defined(__wasm__)
++  posix_spawn_fncs.file_actions.addchdir_np =
++    (int (*)(const posix_spawn_file_actions_t*, const char*))
++    posix_spawn_file_actions_addchdir_np;
++#else
+   /* Try to locate all non-portable functions at runtime */
+   posix_spawn_fncs.file_actions.addchdir_np =
+     dlsym(RTLD_DEFAULT, "posix_spawn_file_actions_addchdir_np");
++#endif
+ }
+ 
+ 
+ static void uv__spawn_init_can_use_setsid(void) {
++#if defined(__wasm__)
++  posix_spawn_can_use_setsid = 1;
++#else
+   int which[] = {CTL_KERN, KERN_OSRELEASE};
+   unsigned major;
+   unsigned minor;
+@@ -454,6 +475,7 @@
+     return;
+ 
+   posix_spawn_can_use_setsid = (major >= 19);  /* macOS Catalina */
++#endif
+ }
+ 
+ 
+@@ -838,7 +860,12 @@
+   if (pthread_sigmask(SIG_BLOCK, &signewset, &sigoldset) != 0)
+     abort();
+ 
++#if defined(__wasm__)
++  *pid = -1;
++  errno = ENOSYS;
++#else
+   *pid = fork();
++#endif
+ 
+   if (*pid == 0) {
+     /* Fork succeeded, in the child process */
+@@ -869,7 +896,7 @@
+   int exec_errorno;
+   ssize_t r;
+ 
+-#if defined(__APPLE__)
++#if defined(__APPLE__) || defined(__wasm__)
+   uv_once(&posix_spawn_init_once, uv__spawn_init_posix_spawn);
+ 
+   /* Special child process spawn case for macOS Big Sur (11.0) onwards
+@@ -894,8 +921,12 @@
+   /* The posix_spawn flow will return UV_ENOSYS if any of the posix_spawn_x_np
+    * non-standard functions is both _needed_ and _undefined_. In those cases,
+    * default back to the fork/execve strategy. For all other errors, just fail. */
++#if defined(__wasm__)
++  return err;
++#else
+   if (err != UV_ENOSYS)
+     return err;
++#endif
+ 
+ #endif
+ 

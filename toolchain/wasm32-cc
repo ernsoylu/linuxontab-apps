@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# clang for wasm32-unknown-linux-musl, producing programs the LinuxOnTab 2.0
+# kernel can load. Compile flags follow tombl/distro's distro/platform.nix; link
+# flags are the union of that file and LinuxOnTab's packages/build-package.sh
+# (memory imported from the kernel and re-exported, shared, exported table).
+#
+# Needs the tombl/distro devShell (`nix develop github:tombl/distro`), which puts
+# its wasm-capable clang on PATH and sets $sysroot.
+set -e
+: "${sysroot:?run inside the tombl/distro devShell, which sets \$sysroot}"
+
+link=1
+args=()
+for a in "$@"; do
+  case $a in
+    # Static-only platform: no PIC, no dynamic symbol table.
+    -fPIC | -fpic | -fPIE | -fpie | -pie | -rdynamic | -Wl,-E | -Wl,--export-dynamic) continue ;;
+    -c | -S | -E | -M | -MM | -fsyntax-only) link=0 ;;
+  esac
+  args+=("$a")
+done
+
+flags=(
+  --target=wasm32-unknown-linux-musl --sysroot="$sysroot"
+  -matomics -mbulk-memory -mllvm -wasm-enable-sjlj
+  -Wno-unused-command-line-argument
+)
+if ((link)); then
+  flags+=(
+    -static
+    -Wl,--import-memory -Wl,--export-memory -Wl,--shared-memory
+    -Wl,--max-memory="${LOT_MAX_MEMORY:-268435456}"
+    -Wl,--export-table -Wl,--export=__heap_base -Wl,--export=__data_end
+    -Wl,-z,stack-size=8388608
+  )
+fi
+
+exec "${LOT_CLANG:-clang}" "${flags[@]}" "${args[@]}"
