@@ -17,4 +17,5 @@ find_program(CMAKE_RANLIB llvm-ranlib REQUIRED)
 # No dynamic loader: SHARED/MODULE libraries are built as static archives,
 # and there is no RPATH to set (CMake would otherwise relink on install).
 set_property(GLOBAL PROPERTY TARGET_SUPPORTS_SHARED_LIBS FALSE)
-set(CMAKE_SKIP_RPATH ON)
+# A cache entry: CMakeGenericSystem resets a plain variable under CMP0126 OLD.
+set(CMAKE_SKIP_RPATH ON CACHE BOOL "")
