@@ -71,16 +71,20 @@ wasm() {
   export PATH="$WASM/shims:$PATH"
   export LOT_DEPS_PREFIX=$deps/usr PKG_CONFIG_LIBDIR=$deps/usr/lib/pkgconfig
   local tc=$ROOT/toolchain/wasm32-linux-musl.cmake
+  echo "sysroot libs: $(cd "$sysroot/lib" && echo *)"
+  # FindLua's find_library(m) misses the sysroot's empty libm.a, though the
+  # linker resolves -lm fine (Lua itself links with it).
+  local lua_m=-DLUA_MATH_LIBRARY=m
 
   cmake -S "$src/cmake.deps" -B "$deps" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$tc" \
     -DUSE_BUNDLED_LUAJIT=OFF -DUSE_BUNDLED_LUA=ON -DUSE_BUNDLED_TS_PARSERS=OFF \
-    -DLIBUV_URL="$WASM/libuv.tar.gz" -DLIBUV_SHA256="$uv_sha"
+    -DLIBUV_URL="$WASM/libuv.tar.gz" -DLIBUV_SHA256="$uv_sha" -DDEPS_CMAKE_ARGS="$lua_m"
   cmake --build "$deps"
 
   cmake -S "$src" -B "$out" -G Ninja -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE="$tc" -DDEPS_PREFIX="$deps/usr" -DCMAKE_INSTALL_PREFIX=/usr/local \
-    -DPREFER_LUA=ON -DCOMPILE_LUA=OFF -DENABLE_LTO=OFF -DENABLE_LIBINTL=OFF \
+    -DPREFER_LUA=ON -DCOMPILE_LUA=OFF -DENABLE_LTO=OFF -DENABLE_LIBINTL=OFF "$lua_m" \
     -DLUA_PRG="$host_lua" -DLUA_GEN_PRG="$host_lua" \
     -DNLUA0_HOST_PRG="$HOST/nvim/lib/libnlua0.so" -DNVIM_HOST_PRG="$HOST/nvim/bin/nvim"
   cmake --build "$out" --target nvim
